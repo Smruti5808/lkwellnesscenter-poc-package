@@ -7,3 +7,9 @@ playwright-report/
 test-results/
 tmp/
 *.tsbuildinfo
+
+.open-next/
+.wrangler/
+.dev.vars*
+.env*
+cloudflare/bootstrap.generated.json

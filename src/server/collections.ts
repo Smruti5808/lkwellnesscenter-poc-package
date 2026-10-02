@@ -1,6 +1,4 @@
 // Per-collection access and behaviour rules for the generic CRUD API.
-import { unlink } from 'node:fs/promises';
-import path from 'node:path';
 import * as S from '../shared/schemas';
 import type { AppointmentStatus, CollectionName, Data } from '../shared/schemas';
 import { istDate, formatDateTime } from '../shared/time';
@@ -9,7 +7,7 @@ import { canAccessPatient, doctorCanAccess, hasCareRelationship, managedPatientI
 import { careSummary, deletePatients } from './clinical';
 import { validateSlot } from './scheduling';
 import type { AnyRow, Op, Rule } from './crud';
-import { UPLOAD_DIR } from './store';
+import { getStorage } from './storage';
 
 const str = (row: AnyRow, key: string) => row[key] as string | undefined;
 const isPatient = (ctx: Ctx) => ctx.user.role === 'patient';
@@ -179,7 +177,7 @@ export const RULES: Partial<Record<CollectionName, Rule>> = {
     ...patientOwned(S.documentInput),
     creatable: false, // created through the upload endpoint
     after: async (_d, _ctx, row, op) => {
-      if (op === 'delete' && row.storage === 'upload') await unlink(path.join(UPLOAD_DIR, path.basename(str(row, 'fileName')!))).catch(() => {});
+      if (op === 'delete' && row.storage === 'upload') await (await getStorage()).deleteUpload(str(row, 'fileName')!);
     },
   },
 

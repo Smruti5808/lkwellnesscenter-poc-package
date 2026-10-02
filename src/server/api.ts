@@ -1,8 +1,5 @@
 // HTTP routing for /api/v1. Responses use { data } or { error: { code, message, fieldErrors } }.
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prescriptionItem, type CollectionName, type Data, type DocumentRow } from '../shared/schemas';
 import { istDate } from '../shared/time';
@@ -13,13 +10,13 @@ import { analytics, careSummary, deletePatients, doctorPerformance, patientSumma
 import { computeSlots, nextAvailable } from './scheduling';
 import { ruleFor } from './collections';
 import * as crud from './crud';
-import { SEED_DOCUMENT_DIR, UPLOAD_DIR, store } from './store';
+import { getStorage } from './storage';
 
 const JSON_LIMIT = 256 * 1024;
 const UPLOAD_LIMIT = 5 * 1024 * 1024;
 const UPLOAD_TYPES: Record<string, string> = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg' };
 
-async function readJson(request: NextRequest): Promise<unknown> {
+async function readJson(request: Request): Promise<unknown> {
   if (!request.headers.get('content-type')?.includes('application/json')) throw new ApiError(400, 'INVALID_JSON', 'Send a JSON request body.');
   const text = await request.text();
   if (text.length > JSON_LIMIT) throw new ApiError(413, 'TOO_LARGE', 'The request is too large.');
@@ -27,18 +24,18 @@ async function readJson(request: NextRequest): Promise<unknown> {
 }
 
 /** Rejects cross-site writes: the browser's Origin must match the host serving the app. */
-function checkOrigin(request: NextRequest) {
+function checkOrigin(request: Request) {
   const origin = request.headers.get('origin');
-  const host = request.headers.get('host') ?? request.nextUrl.host;
+  const host = request.headers.get('host') ?? new URL(request.url).host;
   let originHost = '';
   try { originHost = origin ? new URL(origin).host : ''; } catch { /* malformed origin */ }
   if (originHost !== host) throw new ApiError(403, 'ORIGIN_DENIED', 'Request origin was rejected.');
 }
 
-const ok = (data: unknown, status = 200) => NextResponse.json({ data }, { status, headers: { 'Cache-Control': 'no-store' } });
-const fail = (error: ApiError, requestId: string) => NextResponse.json({ error: { code: error.code, message: error.message, fieldErrors: error.fieldErrors }, meta: { requestId } }, { status: error.status, headers: { 'Cache-Control': 'no-store' } });
-function withCookie(response: NextResponse, request: NextRequest, token: string) {
-  response.cookies.set(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: request.nextUrl.protocol === 'https:', path: '/', maxAge: token ? MAX_MS / 1000 : 0 });
+const ok = (data: unknown, status = 200) => Response.json({ data }, { status, headers: { 'Cache-Control': 'no-store' } });
+const fail = (error: ApiError, requestId: string) => Response.json({ error: { code: error.code, message: error.message, fieldErrors: error.fieldErrors }, meta: { requestId } }, { status: error.status, headers: { 'Cache-Control': 'no-store' } });
+function withCookie(response: Response, request: Request, token: string) {
+  response.headers.append('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${token ? MAX_MS / 1000 : 0}${new URL(request.url).protocol === 'https:' ? '; Secure' : ''}`);
   return response;
 }
 
@@ -64,7 +61,7 @@ function patientList(data: Data, ctx: Ctx) {
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function handleUpload(request: NextRequest, data: Data, ctx: Ctx) {
+async function handleUpload(request: Request, data: Data, ctx: Ctx) {
   const form = await request.formData();
   const file = form.get('file');
   if (!(file instanceof File)) throw invalid('Choose a file to upload.', { file: ['Required'] });
@@ -77,8 +74,7 @@ async function handleUpload(request: NextRequest, data: Data, ctx: Ctx) {
   const fields = meta.data as { patientId: string; title: string; category: DocumentRow['category']; documentDate: string; issuedBy?: string; notes?: string };
   if (!canAccessPatient(data, ctx, fields.patientId)) throw forbidden();
   const id = newId(), fileName = `${id}${extension}`, at = nowIso();
-  await mkdir(UPLOAD_DIR, { recursive: true });
-  await writeFile(path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, fileName), Buffer.from(await file.arrayBuffer()));
+  await (await getStorage()).writeUpload(fileName, new Uint8Array(await file.arrayBuffer()), file.type);
   const row = { id, createdAt: at, updatedAt: at, ...fields, fileName, mimeType: file.type, byteSize: file.size, storage: 'upload' as const, uploadedBy: ctx.user.id };
   data.documents.push(row);
   audit(data, ctx, 'CREATE', { collection: 'documents', recordId: id, patientId: fields.patientId });
@@ -90,7 +86,7 @@ async function handleUpload(request: NextRequest, data: Data, ctx: Ctx) {
   return row;
 }
 
-export async function handleApi(request: NextRequest, segments: string[]): Promise<NextResponse> {
+export async function handleApi(request: Request, segments: string[]): Promise<Response> {
   const requestId = randomUUID();
   const method = request.method;
   const route = segments.join('/');
@@ -98,9 +94,10 @@ export async function handleApi(request: NextRequest, segments: string[]): Promi
     if (method !== 'GET') checkOrigin(request);
     const isUpload = route === 'documents/upload' && method === 'POST';
     const body = ['POST', 'PATCH'].includes(method) && !isUpload ? await readJson(request) : undefined;
-    const token = request.cookies.get(COOKIE)?.value;
+    const token = request.headers.get('cookie')?.split(';').map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 
-    return await store.transaction(async data => {
+    const storage = await getStorage();
+    return await storage.transaction(async data => {
       // ---- Public ----
       if (route === 'auth/demo-accounts' && method === 'GET') {
         return ok(data.users.filter(u => u.active).map(u => ({ name: u.name, role: u.role, email: u.email, detail: u.role === 'doctor' ? data.doctors.find(d => d.id === u.doctorId)?.specialty : u.role === 'patient' ? 'Patient' : 'Administrator', pending: u.role === 'doctor' && data.doctors.find(d => d.id === u.doctorId)?.verification !== 'verified' })));
@@ -121,7 +118,7 @@ export async function handleApi(request: NextRequest, segments: string[]): Promi
 
       if (route === 'directory' && method === 'GET') return ok(directory(data));
       if (segments[0] === 'doctors' && segments[2] === 'slots' && method === 'GET') {
-        const q = request.nextUrl.searchParams;
+        const q = new URL(request.url).searchParams;
         const days = Math.min(Number(q.get('days') ?? 14) || 14, 30);
         return ok(computeSlots(data, { doctorId: segments[1], typeId: q.get('typeId') ?? '', from: q.get('from') ?? istDate(), days, excludeAppointmentId: q.get('exclude') ?? undefined }));
       }
@@ -168,11 +165,9 @@ export async function handleApi(request: NextRequest, segments: string[]): Promi
       if (segments[0] === 'documents' && segments[2] === 'file' && method === 'GET') {
         const doc = data.documents.find(d => d.id === segments[1]);
         if (!doc || !canAccessPatient(data, ctx, doc.patientId)) throw notFound();
-        const dir = doc.storage === 'seed' ? SEED_DOCUMENT_DIR : UPLOAD_DIR;
-        // Uploaded and seed files are private runtime data, deliberately excluded from build tracing.
-        const bytes = await readFile(/*turbopackIgnore: true*/ path.join(dir, path.basename(doc.fileName))).catch(() => { throw new ApiError(404, 'FILE_MISSING', 'The file for this document is missing.'); });
+        const bytes = await storage.readDocument(doc).catch(() => { throw new ApiError(404, 'FILE_MISSING', 'The file for this document is missing.'); });
         if (ctx.user.role === 'doctor') audit(data, ctx, 'DOCUMENT_VIEWED', { recordId: doc.id, patientId: doc.patientId });
-        return new NextResponse(new Uint8Array(bytes), { headers: { 'Content-Type': doc.mimeType, 'Content-Disposition': `inline; filename="${doc.fileName}"`, 'Cache-Control': 'private, no-store' } });
+        return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': doc.mimeType, 'Content-Disposition': `inline; filename="${doc.fileName}"`, 'Cache-Control': 'private, no-store' } });
       }
 
       if (route === 'privacy/export' && method === 'GET') {
@@ -187,7 +182,7 @@ export async function handleApi(request: NextRequest, segments: string[]): Promi
           feedback: mine(data.feedback), accessBlocks: mine(data.accessBlocks), accessLog: mine(data.audit),
         };
         audit(data, ctx, 'DATA_EXPORTED', { patientId: ctx.user.patientId });
-        return new NextResponse(JSON.stringify(exported, null, 2), { headers: { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="my-health-data-${istDate()}.json"`, 'Cache-Control': 'no-store' } });
+        return new Response(JSON.stringify(exported, null, 2), { headers: { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="my-health-data-${istDate()}.json"`, 'Cache-Control': 'no-store' } });
       }
       if (route === 'privacy/delete-account' && method === 'POST') {
         requireRole(ctx, 'patient');
@@ -198,8 +193,7 @@ export async function handleApi(request: NextRequest, segments: string[]): Promi
         data.sessions = data.sessions.filter(s => s.userId !== ctx.user.id);
         data.notifications = data.notifications.filter(n => n.userId !== ctx.user.id);
         audit(data, null, 'ACCOUNT_DELETED', { detail: `${ctx.patientIds.length} patient record(s)` });
-        const { unlink } = await import('node:fs/promises');
-        for (const file of uploads) await unlink(path.join(UPLOAD_DIR, path.basename(file))).catch(() => {});
+        for (const file of uploads) await storage.deleteUpload(file);
         return withCookie(ok({ deleted: true }), request, '');
       }
 
@@ -229,7 +223,7 @@ export async function handleApi(request: NextRequest, segments: string[]): Promi
         const name = segments[1] as CollectionName;
         const rule = ruleFor(name);
         const id = segments[2];
-        if (!id && method === 'GET') return ok(crud.list(rule, data, ctx, name, Object.fromEntries(request.nextUrl.searchParams)));
+        if (!id && method === 'GET') return ok(crud.list(rule, data, ctx, name, Object.fromEntries(new URL(request.url).searchParams)));
         if (!id && method === 'POST') return ok(await crud.create(rule, data, ctx, name, body), 201);
         if (id && method === 'GET') return ok(crud.read(rule, data, ctx, name, id));
         if (id && method === 'PATCH') return ok(await crud.update(rule, data, ctx, name, id, body));

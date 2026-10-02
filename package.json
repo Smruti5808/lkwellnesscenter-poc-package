@@ -11,12 +11,19 @@
     "test:e2e": "playwright test",
     "data:seed": "node --require ./scripts/register-ts.cjs scripts/data.ts seed",
     "data:reset": "node --require ./scripts/register-ts.cjs scripts/data.ts reset --yes",
-    "data:check": "node --require ./scripts/register-ts.cjs scripts/data.ts check"
+    "data:check": "node --require ./scripts/register-ts.cjs scripts/data.ts check",
+    "build:cloudflare": "npm run data:cloudflare:prepare && opennextjs-cloudflare build",
+    "preview:cloudflare": "npm run build:cloudflare && wrangler dev",
+    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
+    "data:cloudflare:export": "node --require ./scripts/register-ts.cjs scripts/cloudflare-data.ts export",
+    "data:cloudflare:prepare": "node --require ./scripts/register-ts.cjs scripts/cloudflare-data.ts prepare",
+    "test:e2e:cloudflare": "playwright test --config playwright.cloudflare.config.ts"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "1.20.7",
     "lucide-react": "1.49.0",
     "next": "16.3.8",
     "proper-lockfile": "4.1.2",
@@ -25,11 +32,15 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261002.1",
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.4",
     "@types/proper-lockfile": "4.1.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "typescript": "5.9.3"
+    "esbuild": "0.28.1",
+    "miniflare": "5.20261001.0-alpha",
+    "typescript": "5.9.3",
+    "wrangler": "4.147.0"
   }
 }
