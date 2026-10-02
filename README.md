@@ -2,9 +2,16 @@
 
 Developer and AI-agent handoff. Last updated **2 October 2026**.
 
-A working proof of concept of the components in [`../Doctor_Patient_App_Components.docx`](../Doctor_Patient_App_Components.docx): a **patient portal**, a **doctor portal**, and an **admin area**, built as one Next.js app. There is **no database**: all data lives in one JSON file, and every record type supports create, read, update, and delete through a single generic API. All data is dummy data.
+A working proof of concept of the components in [`docs/Doctor_Patient_App_Components.docx`](docs/Doctor_Patient_App_Components.docx): a **patient portal**, a **doctor portal**, and an **admin area**, built as one Next.js app. There is **no database**: all data lives in one JSON file, and every record type supports create, read, update, and delete through a single generic API. All data is dummy data.
 
 **Status:** feature-complete for the scope below. Typecheck and a warning-free production build pass, along with 33 API tests and 15 browser tests (run against both the dev server and the production build).
+
+**Documents** (in [`docs/`](docs/)):
+- [`Doctor_Patient_App_Components.docx`](docs/Doctor_Patient_App_Components.docx): the components this POC implements.
+- [`LK_Wellness_POC_Demo_Guide.docx`](docs/LK_Wellness_POC_Demo_Guide.docx): a walkthrough of every main screen, a 15-minute demo script, and coverage against the components document.
+- [`LK_Wellness_POC_Demo.pptx`](docs/LK_Wellness_POC_Demo.pptx): a 21-slide demo deck with speaker notes.
+
+The demo guide and deck were captured on 2 October 2026, before the health-records timeline and prescription uploads were added, so they show the earlier test counts (32 API, 14 browser).
 
 ## 1. Run it
 
