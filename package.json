@@ -1,0 +1,35 @@
+{
+  "name": "doctor-patient-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "node --require ./scripts/register-ts.cjs --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "data:seed": "node --require ./scripts/register-ts.cjs scripts/data.ts seed",
+    "data:reset": "node --require ./scripts/register-ts.cjs scripts/data.ts reset --yes",
+    "data:check": "node --require ./scripts/register-ts.cjs scripts/data.ts check"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "lucide-react": "1.49.0",
+    "next": "16.3.8",
+    "proper-lockfile": "4.1.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.4",
+    "@types/proper-lockfile": "4.1.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

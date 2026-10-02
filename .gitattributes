@@ -1,0 +1,4 @@
+# Keep demo documents byte-exact (no line-ending conversion).
+*.pdf binary
+*.png binary
+*.jpg binary
